@@ -47,7 +47,7 @@ with st.sidebar:
     # หากไม่ได้ตั้ง Secrets ไว้ จะให้กรอกผ่านหน้าเว็บ
     if not api_key:
         api_key = st.text_input("ระบุ Google Gemini API Key:", type="password")
-        st.caption("แนะนำให้ตั้งค่าใน Secrets ของ Streamlit Cloud เพื่อไม่ต้องกรอกทุกครั้ง")
+        st.caption("สามารถนำ API Key ไปใส่ใน Secrets ของ Streamlit Cloud เพื่อความสะดวกได้")
     
     st.subheader("🎯 ระดับวิทยฐานะเป้าหมาย")
     target_rank = st.selectbox(
@@ -87,10 +87,10 @@ if st.button("🚀 เริ่มวิเคราะห์แผนการ�
                 # 1. สกัดข้อความ
                 plan_text = extract_text_from_file(uploaded_file)
                 if not plan_text.strip():
-                    st.error("ไม่สามารถอ่านข้อความจากไฟล์ได้ กรุณาตรวจสอบว่าเป็นไฟล์เอกสารไม่ใช่ภาพสแกน")
+                    st.error("ไม่สามารถอ่านข้อความจากไฟล์ได้ กรุณาตรวจสอบว่าเป็นไฟล์เอกสารที่มีตัวหนังสือพิมพ์")
                     st.stop()
 
-                # 2. เชื่อมต่อ Gemini API
+                # 2. เตรียมคำสั่งการประเมิน
                 client = genai.Client(api_key=api_key)
                 
                 system_instruction = f"""
@@ -99,7 +99,7 @@ if st.button("🚀 เริ่มวิเคราะห์แผนการ�
 
 กรอบการประเมิน:
 1. ตรวจสอบ 11 องค์ประกอบโครงสร้างแผน (ครบถ้วน/ไม่ครบ/ขาดหาย)
-2. ประเมิน 8 ตัวชี้วัดการจัดการเรียนรู้ ว.PA (คะแนน 1-4 พร้อมยกหลักฐานจากแผน)
+2. ประเมิน 8 ตัวชี้วัดการจัดการเรียนรู้ ว.PA (คะแนน 1-4 พร้อมยกหลักฐานในแผน)
 3. ตรวจสอบ Constructive Alignment: จุดประสงค์ (K, P, A) สอดคล้องกับกิจกรรม วิธีวัด เครื่องมือวัด และเกณฑ์การประเมินหรือไม่
 4. วิเคราะห์การตอบโจทย์วิทยฐานะเป้าหมาย (เช่น หากเป็น 'ครูชำนาญการ' ต้องแสดงให้เห็นการ 'แก้ปัญหา' ผู้เรียนชัดเจน มีการวัดผลก่อน-หลัง หรือเทคนิคแก้จุดอ่อนเฉพาะทาง)
 5. สรุปจุดเด่น จุดด้อย/ข้อควรระวัง และข้อเสนอแนะในการปรับปรุงที่ชัดเจน นำไปแก้ไขได้ทันที
@@ -145,21 +145,40 @@ if st.button("🚀 เริ่มวิเคราะห์แผนการ�
 }}
 """
 
-                response = client.models.generate_content(
-                    model='gemini-3.8-flash',
-                    contents=[
-                        f"นี่คือข้อความในแผนการสอน:\n\n{plan_text[:35000]}"
-                    ],
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        temperature=0.1
-                    )
-                )
+                # ระบบสลับโมเดลอัตโนมัติ (Fallback) ป้องกัน Error 503 เซิร์ฟเวอร์หนาแน่น
+                candidate_models = [
+                    'gemini-3.8-flash',
+                    'gemini-flash-latest',
+                    'gemini-2.5-flash'
+                ]
+                
+                result = None
+                last_error = None
 
-                result = json.loads(response.text)
+                for model_name in candidate_models:
+                    try:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[
+                                f"นี่คือข้อความในแผนการสอน:\n\n{plan_text[:30000]}"
+                            ],
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                response_mime_type="application/json",
+                                temperature=0.1
+                            )
+                        )
+                        result = json.loads(response.text)
+                        if result:
+                            break
+                    except Exception as err:
+                        last_error = err
+                        continue
 
-                # 3. แสดงผลลัพธ์
+                if not result:
+                    raise Exception(f"เซิร์ฟเวอร์ AI มีผู้ใช้งานหนาแน่นชั่วคราว: {last_error}")
+
+                # 3. นำผลลัพธ์แสดงบนหน้าเว็บ
                 st.success("✅ วิเคราะห์แผนการสอนเสร็จสิ้นเรียบร้อยแล้ว!")
                 
                 col1, col2, col3 = st.columns(3)
