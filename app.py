@@ -146,7 +146,7 @@ if st.button("🚀 เริ่มวิเคราะห์แผนการ�
 """
 
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.8-flash',
                     contents=[
                         f"นี่คือข้อความในแผนการสอน:\n\n{plan_text[:35000]}"
                     ],
