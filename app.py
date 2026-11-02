@@ -152,7 +152,7 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
             }
 
             # ยิงตรงผ่าน REST API พร้อมระบบ Timeout ไม่ให้หน้าค้าง
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
             
             resp = requests.post(
                 url, 
