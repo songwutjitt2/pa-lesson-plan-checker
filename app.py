@@ -1,8 +1,7 @@
 import json
 import streamlit as st
+import requests
 from docx import Document
-from google import genai
-from google.genai import types
 from pypdf import PdfReader
 
 # --- ตั้งค่าหน้าเว็บ ---
@@ -15,12 +14,11 @@ st.set_page_config(
 # --- ดึง API Key จาก Secrets หรือช่องกรอก ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- ฟังก์ชันสกัดข้อความแบบรวดเร็ว (Fast Extractor) ---
+# --- ฟังก์ชันสกัดข้อความความเร็วสูง ---
 def extract_text_from_file_fast(uploaded_file) -> str:
     text = ""
     filename = uploaded_file.name.lower()
     
-    # 1. ไฟล์ DOCX
     if filename.endswith(".docx"):
         doc = Document(uploaded_file)
         text_list = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -31,10 +29,9 @@ def extract_text_from_file_fast(uploaded_file) -> str:
                     text_list.append(" | ".join(row_text))
         text = "\n".join(text_list)
                     
-    # 2. ไฟล์ PDF (อ่านเฉพาะ 10 หน้าแรกเพื่อความรวดเร็ว)
     elif filename.endswith(".pdf"):
         reader = PdfReader(uploaded_file)
-        max_pages = min(len(reader.pages), 10)
+        max_pages = min(len(reader.pages), 8)
         text_list = []
         for i in range(max_pages):
             extracted = reader.pages[i].extract_text()
@@ -42,16 +39,15 @@ def extract_text_from_file_fast(uploaded_file) -> str:
                 text_list.append(extracted)
         text = "\n".join(text_list)
                 
-    # ตัดทอนให้เหลือ 12,000 ตัวอักษร เพื่อให้ประมวลผลได้ไวที่สุด
-    return text[:12000]
+    # ตัดให้เหลือ 10,000 ตัวอักษรเพื่อความเร็วสูงสุด
+    return text[:10000]
 
-# --- เมนูด้านข้าง (Sidebar) ---
+# --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ การตั้งค่าระบบ")
     
     if not api_key:
         api_key = st.text_input("ระบุ Google Gemini API Key:", type="password")
-        st.caption("สามารถใส่ API Key ไว้ใน Secrets เพื่อความสะดวกรวดเร็ว")
     
     st.subheader("🎯 ระดับวิทยฐานะเป้าหมาย")
     target_rank = st.selectbox(
@@ -74,7 +70,7 @@ with st.sidebar:
         "โรงเรียนวัดนางสาว (ถาวรราษฎร์บำรุง)"
     )
 
-# --- ส่วนแสดงผลหลัก ---
+# --- หน้าจอหลัก ---
 st.title("📋 โปรแกรม AI ตรวจสอบและประเมินแผนการจัดการเรียนรู้ (ว.PA)")
 st.caption("⚡ วิเคราะห์ด่วน: 11 องค์ประกอบ | 8 ตัวชี้วัดการจัดการเรียนรู้ | Constructive Alignment | การตอบโจทย์วิทยฐานะ")
 
@@ -92,30 +88,21 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
         try:
             plan_text = extract_text_from_file_fast(uploaded_file)
             if not plan_text.strip():
-                st.error("ไม่สามารถอ่านข้อความจากไฟล์ได้ กรุณาตรวจสอบว่าเป็นไฟล์เอกสารที่มีตัวหนังสือพิมพ์")
+                st.error("ไม่สามารถอ่านข้อความจากไฟล์ได้ กรุณาตรวจสอบเอกสาร")
                 st.stop()
 
-            status_box.info("🤖 AI กำลังประเมินผลตามเกณฑ์ ว.PA...")
+            status_box.info("🤖 AI กำลังประเมินผลตามเกณฑ์ ว.PA (กำลังส่งข้อมูล)...")
 
-            client = genai.Client(api_key=api_key)
-            
-            system_instruction = f"""
-คุณคือผู้เชี่ยวชาญการประเมินวิทยฐานะ ว.PA วิเคราะห์แผนการสอนนี้แบบกระชับ ตรงไปตรงมา อิงตามวิทยฐานะ: '{target_rank}'
-ประเมิน:
-1. 11 องค์ประกอบของแผน
-2. 8 ตัวชี้วัดการจัดการเรียนรู้ ว.PA
-3. ความสอดคล้องการวัดผล (Constructive Alignment)
-4. การตอบโจทย์วิทยฐานะ (เช่น ชำนาญการ ต้องเห็นการแก้ปัญหาชัดเจน)
-5. สรุปจุดเด่น จุดด้อย และข้อเสนอแนะ
-
-ตอบกลับเป็น JSON โครงสร้างนี้เท่านั้น:
+            system_prompt = f"""
+คุณคือผู้เชี่ยวชาญการประเมินวิทยฐานะ ว.PA วิเคราะห์แผนการสอนนี้แบบกระชับ ตรงประเด็น วิทยฐานะ: '{target_rank}'
+ตอบกลับเป็น JSON ตามโครงสร้างนี้เท่านั้น (ห้ามใส่ Markdown อื่นนอกเหนือจาก JSON):
 {{
   "overall_score": 85,
   "rank_status": "ผ่านเกณฑ์ / ต้องปรับปรุง",
   "is_assessment_aligned": true,
-  "strengths": ["...", "..."],
-  "weaknesses": ["...", "..."],
-  "actionable_recommendations": ["...", "..."],
+  "strengths": ["จุดเด่น 1", "จุดเด่น 2"],
+  "weaknesses": ["จุดด้อย 1", "จุดด้อย 2"],
+  "actionable_recommendations": ["ข้อเสนอแนะ 1", "ข้อเสนอแนะ 2"],
   "structural_elements_11": [
     {{"name": "1. หัวเรื่องและเวลา", "status": "Pass", "comment": "..."}},
     {{"name": "2. มาตรฐาน/ตัวชี้วัด", "status": "Pass", "comment": "..."}},
@@ -149,41 +136,48 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
 }}
 """
 
-            candidate_models = ['gemini-3.8-flash', 'gemini-flash-latest']
-            result = None
-            last_error = None
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": system_prompt},
+                            {"text": f"เนื้อหาแผนการสอน:\n\n{plan_text}"}
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "temperature": 0.2
+                }
+            }
 
-            for model_name in candidate_models:
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[f"ข้อความแผนการสอน:\n\n{plan_text}"],
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_instruction,
-                            response_mime_type="application/json",
-                            temperature=0.2
-                        )
-                    )
-                    
-                    raw_text = response.text.strip()
-                    if raw_text.startswith("```json"):
-                        raw_text = raw_text[7:]
-                    if raw_text.endswith("```"):
-                        raw_text = raw_text[:-3]
-                        
-                    result = json.loads(raw_text.strip())
-                    if result:
-                        break
-                except Exception as err:
-                    last_error = err
-                    continue
+            # ยิงตรงผ่าน REST API พร้อมระบบ Timeout ไม่ให้หน้าค้าง
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={api_key}"
+            
+            resp = requests.post(
+                url, 
+                headers={"Content-Type": "application/json"}, 
+                data=json.dumps(payload), 
+                timeout=30
+            )
 
             status_box.empty()
 
-            if not result:
-                raise Exception(f"AI ขัดข้องชั่วคราว: {last_error}")
+            if resp.status_code != 200:
+                st.error(f"เกิดข้อผิดพลาดจาก Gemini API (รหัส {resp.status_code}): {resp.text}")
+                st.stop()
 
-            # --- แสดงผลลัพธ์บน Dashboard ---
+            res_data = resp.json()
+            raw_text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+
+            result = json.loads(raw_text.strip())
+
+            # --- แสดงผล Dashboard ---
             st.success("✅ วิเคราะห์แผนการสอนเสร็จสิ้นเรียบร้อยแล้ว!")
             
             col1, col2, col3 = st.columns(3)
