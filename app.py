@@ -15,12 +15,12 @@ st.set_page_config(
 # --- ดึง API Key จาก Secrets หรือช่องกรอก ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- ฟังก์ชันสกัดข้อความแบบความเร็วสูง (Fast Extractor) ---
+# --- ฟังก์ชันสกัดข้อความแบบรวดเร็ว (Fast Extractor) ---
 def extract_text_from_file_fast(uploaded_file) -> str:
     text = ""
     filename = uploaded_file.name.lower()
     
-    # 1. ไฟล์ DOCX: อ่านย่อหน้าหลักและตารางกิจกรรม
+    # 1. ไฟล์ DOCX
     if filename.endswith(".docx"):
         doc = Document(uploaded_file)
         text_list = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -31,7 +31,7 @@ def extract_text_from_file_fast(uploaded_file) -> str:
                     text_list.append(" | ".join(row_text))
         text = "\n".join(text_list)
                     
-    # 2. ไฟล์ PDF: สกัดเฉพาะ 10 หน้าแรก (ครอบคลุม 11 องค์ประกอบ และ 8 ตัวชี้วัดครบถ้วน)
+    # 2. ไฟล์ PDF (อ่านเฉพาะ 10 หน้าแรกเพื่อความรวดเร็ว)
     elif filename.endswith(".pdf"):
         reader = PdfReader(uploaded_file)
         max_pages = min(len(reader.pages), 10)
@@ -42,8 +42,8 @@ def extract_text_from_file_fast(uploaded_file) -> str:
                 text_list.append(extracted)
         text = "\n".join(text_list)
                 
-    # ตัดทอนให้เหลือ 15,000 ตัวอักษรเพื่อความเร็วสูงสุดในการวิเคราะห์
-    return text[:15000]
+    # ตัดทอนให้เหลือ 12,000 ตัวอักษร เพื่อให้ประมวลผลได้ไวที่สุด
+    return text[:12000]
 
 # --- เมนูด้านข้าง (Sidebar) ---
 with st.sidebar:
@@ -87,16 +87,15 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
         st.warning("กรุณาแนบไฟล์แผนการสอน (.docx หรือ .pdf)")
     else:
         status_box = st.empty()
-        status_box.info("⚡ กำลังสกัดข้อความจากเอกสาร...")
+        status_box.info("⚡ กำลังอ่านเนื้อหาเอกสาร...")
 
         try:
-            # สกัดข้อความด่วน
             plan_text = extract_text_from_file_fast(uploaded_file)
             if not plan_text.strip():
                 st.error("ไม่สามารถอ่านข้อความจากไฟล์ได้ กรุณาตรวจสอบว่าเป็นไฟล์เอกสารที่มีตัวหนังสือพิมพ์")
                 st.stop()
 
-            status_box.info("🤖 AI กำลังประเมินผลตามเกณฑ์ ว.PA (ประมาณ 3–5 วินาที)...")
+            status_box.info("🤖 AI กำลังประเมินผลตามเกณฑ์ ว.PA...")
 
             client = genai.Client(api_key=api_key)
             
@@ -109,7 +108,7 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
 4. การตอบโจทย์วิทยฐานะ (เช่น ชำนาญการ ต้องเห็นการแก้ปัญหาชัดเจน)
 5. สรุปจุดเด่น จุดด้อย และข้อเสนอแนะ
 
-ตอบกลับเป็น JSON รูปแบบนี้เท่านั้น:
+ตอบกลับเป็น JSON โครงสร้างนี้เท่านั้น:
 {{
   "overall_score": 85,
   "rank_status": "ผ่านเกณฑ์ / ต้องปรับปรุง",
@@ -162,12 +161,17 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
                         config=types.GenerateContentConfig(
                             system_instruction=system_instruction,
                             response_mime_type="application/json",
-                            temperature=0.1,
-                            # ปิด Thinking Budget เพื่อให้ตอบผลลัพธ์ออกมาทันที
-                            thinking_config=types.ThinkingConfig(thinking_budget=0)
+                            temperature=0.2
                         )
                     )
-                    result = json.loads(response.text)
+                    
+                    raw_text = response.text.strip()
+                    if raw_text.startswith("```json"):
+                        raw_text = raw_text[7:]
+                    if raw_text.endswith("```"):
+                        raw_text = raw_text[:-3]
+                        
+                    result = json.loads(raw_text.strip())
                     if result:
                         break
                 except Exception as err:
@@ -179,7 +183,7 @@ if st.button("⚡ เริ่มวิเคราะห์แผนการ�
             if not result:
                 raise Exception(f"AI ขัดข้องชั่วคราว: {last_error}")
 
-            # แสดงผลลัพธ์
+            # --- แสดงผลลัพธ์บน Dashboard ---
             st.success("✅ วิเคราะห์แผนการสอนเสร็จสิ้นเรียบร้อยแล้ว!")
             
             col1, col2, col3 = st.columns(3)
